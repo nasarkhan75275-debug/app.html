@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NASAR Globe 3D PRO</title>
+<script src="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Cesium.js"></script>
+<link href="https://cesium.com/downloads/cesiumjs/releases/1.115/Build/Cesium/Widgets/widgets.css" rel="stylesheet">
+<style>
+:root{--bg:#000;--fg:#e8e8e8;--green:#00ff88;--border:#222;--card:#111}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#000;color:var(--fg);font-family:monospace;height:100vh;display:flex;flex-direction:column;overflow:hidden}
+header{border-bottom:1px solid var(--border);padding:10px 14px;display:flex;justify-content:space-between;align-items:center;z-index:20;background:#000}
+button{font-family:inherit;cursor:pointer}
+.btn{background:#111;border:1px solid var(--border);color:var(--fg);padding:6px 12px;font-size:11px}
+.btn:hover{border-color:var(--green)} .btn-green{background:var(--fg);color:#000;font-weight:700} .btn-green:hover{background:var(--green)}
+#cesiumContainer{flex:1}
+#info{position:absolute;top:50px;left:10px;background:rgba(0,0,0,0.8);color:var(--green);padding:10px;font-size:11px;border:1px solid var(--border);z-index:10;min-width:200px}
+.modal{position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.9);display:none;justify-content:center;align-items:center;z-index:100}
+.modal.open{display:flex}
+.modal-box{background:var(--card);border:1px solid var(--border);padding:20px;width:90%;max-width:380px}
+.modal-box h2{font-size:13px;margin-bottom:16px;color:var(--green)}
+input{width:100%;background:#000;border:1px solid var(--border);color:var(--fg);padding:10px;margin:6px 0;font-family:inherit;font-size:12px;outline:none}
+input:focus{border-color:var(--green)}
+.history-item{padding:8px;border:1px solid var(--border);margin:6px 0;display:flex;justify-content:space-between;align-items:center;background:#000;font-size:11px}
+.danger{color:#ff4444;border-color:#ff4444}
+</style>
+</head>
+<body>
+<header>
+  <div><span style="color:var(--green)">*</span> NASAR_GLOBE_3D_PRO</div>
+  <div style="display:flex;gap:8px">
+    <button class="btn" onclick="openModal('historyModal')">📜 HISTORY</button>
+    <button class="btn" onclick="openModal('accountModal')" id="accBtn">👤 ACCOUNT</button>
+    <button class="btn" onclick="toggleSettings()">⚙</button>
+  </div>
+</header>
+
+<div id="info">🛰️ LIVE NASA + ZOOM EARTH<br><span id="userLabel">Guest</span> | <span id="coords">0,0</span><br>
+<button class="btn" onclick="flyToPatna()">📍 Patna</button> <button class="btn" onclick="saveHistory('Fly to Patna')">+ Save</button>
+</div>
+
+<div id="cesiumContainer"></div>
+
+<!-- ACCOUNT MODAL -->
+<div class="modal" id="accountModal">
+  <div class="modal-box">
+    <h2>ACCOUNT_</h2>
+    <div id="authForm">
+      <input id="email" type="email" placeholder="email: nasar@patna.com">
+      <input id="pass" type="password" placeholder="password">
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <button class="btn btn-green" style="flex:1" onclick="signUp()">SIGN UP</button>
+        <button class="btn" style="flex:1" onclick="signIn()">SIGN IN</button>
+      </div>
+    </div>
+    <div id="userPanel" style="display:none">
+      <p style="font-size:12px;margin:8px 0">Logged in as: <span id="currentEmail" style="color:var(--green)"></span></p>
+      <p style="font-size:10px;color:#888">Created: <span id="accDate"></span></p>
+      <button class="btn" style="width:100%;margin-top:12px" onclick="signOut()">SIGN OUT</button>
+      <button class="btn danger" style="width:100%;margin-top:8px" onclick="deleteAccount()">🗑️ DELETE ACCOUNT</button>
+    </div>
+    <button class="btn" style="width:100%;margin-top:12px" onclick="closeModal('accountModal')">CLOSE</button>
+  </div>
+</div>
+
+<!-- HISTORY MODAL -->
+<div class="modal" id="historyModal">
+  <div class="modal-box" style="max-width:500px;max-height:80vh;overflow-y:auto">
+    <h2>HISTORY_ <span style="color:#888;font-size:10px" id="historyCount">0 items</span></h2>
+    <div id="historyList"></div>
+    <div style="display:flex;gap:8px;margin-top:12px">
+      <button class="btn danger" style="flex:1" onclick="clearHistory()">🗑️ CLEAR ALL HISTORY</button>
+      <button class="btn" style="flex:1" onclick="closeModal('historyModal')">CLOSE</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---- ACCOUNT SYSTEM (LocalStorage - Offline First) ----
+let currentUser = JSON.parse(localStorage.getItem('nasar_current_user') || 'null');
+let users = JSON.parse(localStorage.getItem('nasar_users') || '[]');
+let historyData = JSON.parse(localStorage.getItem('nasar_history') || '[]');
+
+function saveAll(){ localStorage.setItem('nasar_users', JSON.stringify(users)); localStorage.setItem('nasar_current_user', JSON.stringify(currentUser)); localStorage.setItem('nasar_history', JSON.stringify(historyData)); }
+
+function signUp(){
+  let e=document.getElementById('email').value.trim(), p=document.getElementById('pass').value.trim();
+  if(!e || !p) return alert('email + pass likh');
+  if(users.find(u=>u.email===e)) return alert('account already exists, sign in karo');
+  let u={email:e, pass:p, created:new Date().toLocaleString(), id:Date.now()};
+  users.push(u); currentUser=u; saveAll(); updateUI(); alert('Account ban gaya!');
+}
+function signIn(){
+  let e=document.getElementById('email').value.trim(), p=document.getElementById('pass').value.trim();
+  let u=users.find(u=>u.email===e && u.pass===p);
+  if(!u) return alert('galat email/pass');
+  currentUser=u; saveAll(); updateUI();
+}
+function signOut(){ currentUser=null; saveAll(); updateUI(); }
+function deleteAccount(){
+  if(!currentUser) return;
+  if(!confirm('Pakka delete karna hai? History bhi udd jayegi!')) return;
+  users=users.filter(u=>u.id!==currentUser.id);
+  historyData=historyData.filter(h=>h.userId!==currentUser.id);
+  currentUser=null; saveAll(); updateUI(); closeModal('accountModal'); alert('Account deleted');
+}
+function updateUI(){
+  let isLogged=!!currentUser;
+  document.getElementById('authForm').style.display=isLogged?'none':'block';
+  document.getElementById('userPanel').style.display=isLogged?'block':'none';
+  document.getElementById('userLabel').textContent=isLogged?currentUser.email:'Guest';
+  document.getElementById('accBtn').textContent=isLogged?'👤 '+currentUser.email.split('@')[0]:'👤 ACCOUNT';
+  if(isLogged){ document.getElementById('currentEmail').textContent=currentUser.email; document.getElementById('accDate').textContent=currentUser.created; }
+  renderHistory();
+}
+
+// ---- HISTORY SYSTEM ----
+function saveHistory(action){
+  let h={id:Date.now(), action:action, time:new Date().toLocaleString(), lat:'25.59', lon:'84.95', userId:currentUser?currentUser.id:'guest'};
+  historyData.unshift(h); if(historyData.length>100) historyData.pop(); saveAll(); renderHistory();
+}
+function renderHistory(){
+  let list=document.getElementById('historyList');
+  let filtered=currentUser?historyData.filter(h=>h.userId===currentUser.id || h.userId==='guest'):historyData.filter(h=>h.userId==='guest');
+  document.getElementById('historyCount').textContent=filtered.length+' items';
+  if(filtered.length===0){ list.innerHTML='<p style="color:#888;font-size:11px">No history yet</p>'; return; }
+  list.innerHTML=filtered.map(h=>`<div class="history-item"><div><b>${h.action}</b><br><span style="color:#888">${h.time}</span></div><button class="btn danger" onclick="deleteOne(${h.id})">DEL</button></div>`).join('');
+}
+function deleteOne(id){ historyData=historyData.filter(h=>h.id!==id); saveAll(); renderHistory(); }
+function clearHistory(){ if(!confirm('Saari history delete?')) return; if(currentUser) historyData=historyData.filter(h=>h.userId!==currentUser.id); else historyData=historyData.filter(h=>h.userId!=='guest'); saveAll(); renderHistory(); }
+
+function openModal(id){ document.getElementById(id).classList.add('open'); if(id==='historyModal') renderHistory(); }
+function closeModal(id){ document.getElementById(id).classList.remove('open'); }
+
+// ---- CESIUM GLOBE ----
+Cesium.Ion.defaultAccessToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJqdGkiOiJlYWE1OWUxNy1mMWZiLTQzYjYtYTQ0OS1kM2ViYmQ1MTk0MmUiLCJpZCI6NTc3MzMsImlhdCI6MTYyMjY0NjQ2N30.SsiWQ_C4K1n9aBo4a5A6q7B8C9D0E1F2G3H4I5J6K7L8M9';
+const viewer = new Cesium.Viewer('cesiumContainer', { imageryProvider: new Cesium.IonImageryProvider({ assetId: 2 }), baseLayerPicker:false, geocoder:false, timeline:false, animation:false });
+function flyToPatna(){ viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(84.95, 25.59, 500000) }); saveHistory('Fly to Patna HQ'); }
+viewer.camera.flyTo({ destination: Cesium.Cartesian3.fromDegrees(0,20,20000000) });
+updateUI(); saveHistory('App Opened');
+</script>
+</body>
+</html>
